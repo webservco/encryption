@@ -1,4 +1,4 @@
-name: component-skeleton
+name: encryption
 type: php
 docroot: public
 #php_version: "8.3"
