@@ -20,7 +20,7 @@
             "dealerdirect/phpcodesniffer-composer-installer": true
         }
     },
-    "description" : "A PHP component/library.",
+    "description" : "A PHP component/library. Encrypts secrets for storage with a key from the configuration (XChaCha20-Poly1305, libsodium), each bound to its row by associated data.",
     "homepage" : "https://webserv.co",
     "keywords" : [
         "component",
@@ -29,7 +29,9 @@
     "license" : "MIT",
     "name" : "webservco/encryption",
     "require": {
-        "php" : "^8.4"
+        "php" : "^8.4",
+        "ext-sodium" : "*",
+        "webservco/configuration" : "^2"
     },
     "require-dev": {
         "pds/skeleton": "^1",

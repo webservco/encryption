@@ -1,29 +1,11 @@
-<!--
-This README is the template for every webservco component. Fill it in when you create a component from the skeleton.
-
-The clone workflow already replaces the skeleton name with the real one. Replace the _italic_ placeholders by hand, drop any (optional) section that doesn't apply, then delete this comment.
-
-Everything lives in this file, no docs folder. Around 100 lines is plenty, and when the reader needs more, link to the source file.
-
-The reader is wiring the component into an app by hand, the way the webservco/sandbox project does it. Use real class names for the component and put the interface in a comment above each object. Give app-specific classes generic names (`ExampleCommand`, not the sandbox's `ImportCommand`). When you mention the sandbox, write "the `webservco/sandbox` project". The only link to it is in the description.
-
-Keep the first description line (the general sentence and the sandbox link) as it is. On its own line below it, write one sentence about what the component does. For `description` in composer.json, use "A PHP component/library." followed by that sentence.
-
-Leave the version out of the install command. Composer picks the current major, while a hardcoded constraint goes stale.
--->
-
 # webservco/encryption
-
-> **Note:** This is a template for creating new components. Delete this note when implementing, and the hidden comment at the start of the file.
 
 A PHP component/library. Please see [webservco/sandbox](https://webservco.github.io/sandbox/) for an example project using these types of components.
 
-_What it does, in one sentence._
+Encrypts secrets for storage with a key from the configuration (XChaCha20-Poly1305, libsodium), each bound to its row by associated data.
 
-- Implements: _[PSR-N: Title](https://www.php-fig.org/psr/psr-N/)_ (optional)
-- Provides: _`psr/xxx-implementation`_ (optional)
-- Requires: _PHP extensions, external services, or setup (database table, config file)_ (optional)
-- Related: _`webservco/xxx` (how it relates)_ (optional)
+- Requires: PHP extension `sodium`; a configuration key that holds the encryption key
+- Related: `webservco/configuration` (the factory reads the key); `webservco/mfa` (stores its TOTP secrets in this format)
 
 ---
 
@@ -37,49 +19,59 @@ composer require webservco/encryption
 
 ## Usage
 
-_Smallest working example for the common case. Usually that means getting an object from a factory and calling one method on it._
-
 ```php
-use WebServCo\Component\Factory\ExampleFactory;
+use WebServCo\Encryption\Factory\SecretEncryptionServiceFactory;
 
-// \WebServCo\Component\Contract\ExampleInterface
-$factory = new ExampleFactory();
-$example = $factory->createExample();
-$result = $example->doSomething($input);
+// \WebServCo\Encryption\Contract\SecretEncryptionServiceFactoryInterface
+$factory = new SecretEncryptionServiceFactory(
+    $configurationGetter, // \WebServCo\Configuration\Contract\ConfigurationGetterInterface
+);
+// \WebServCo\Encryption\Contract\SecretEncryptionServiceInterface
+$encryptionService = $factory->createSecretEncryptionService('EXAMPLE_ENCRYPTION_KEY');
+
+// The associated data names the row and the column. It isn't secret and isn't stored: build it again to decrypt.
+$associatedData = sprintf('account_token|secret|%s', $accountId);
+$storedValue = $encryptionService->encrypt($secret, $associatedData);
+$secret = $encryptionService->decrypt($storedValue, $associatedData);
 ```
 
-_Another common case? Give it its own `###` heading. Two extra examples at most._
+Without the configuration, `new SodiumSecretEncryptionService($key)` takes the key itself, 32 raw bytes.
 
 ---
 
 ## Contracts
 
-_Interfaces an app would type-hint against, and the classes that implement them. Leave out internal ones._
-
 | Interface | Implementation | Purpose |
 | --- | --- | --- |
-| `Contract\ExampleInterface` | `Service\Example` | _What it does._ |
-| `Contract\ExampleFactoryInterface` | `Factory\ExampleFactory` | _Creates `ExampleInterface`._ |
+| `Contract\SecretEncryptionServiceFactoryInterface` | `Factory\SecretEncryptionServiceFactory` | Creates `SecretEncryptionServiceInterface` with the key a configuration key holds. |
+| `Contract\SecretEncryptionServiceInterface` | `Service\SodiumSecretEncryptionService` | Encrypts a secret to base64 text, and decrypts it with the same associated data. |
 
-Namespaces are relative to `WebServCo\Component\`.
+Namespaces are relative to `WebServCo\Encryption\`.
 
 ---
 
-## Configuration (optional)
+## Configuration
 
-_Keys read from `config/.env.ini`, each with an example value._
+The factory takes the name of the key, so each use can have its own.
 
 ```ini
-[Component]
+[Encryption]
 
-EXAMPLE_KEY = 'value'
+; Base64 of 32 random bytes; one key per application and environment:
+; php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'
+EXAMPLE_ENCRYPTION_KEY = ''
 ```
 
 ---
 
-## Notes (optional)
+## Notes
 
-_Anything that surprised you while using it, such as limitations, gotchas or workarounds._
+- **The key.** Keep it out of the database, and back it up: without it nothing decrypts. There is no key rotation: a new key makes every stored value unreadable.
+- **Associated data.** Let it name the row and the column, as in the example: a value copied to another row, or swapped with another column, doesn't decrypt.
+- **Size.** A stored value has 4 × ⌈(n + 41) / 3⌉ characters for n bytes of plaintext. A 40-byte token takes 108, and a `VARCHAR(255)` column holds up to 148 bytes.
+- **Format.** A version byte (`\x01`), a 24-byte random nonce, then the ciphertext with its 16-byte tag, all in base64. The version byte is also part of the associated data. It is the format of `webservco/mfa` v0.0.2: the secrets it stored decrypt with the same key and associated data (a test pins it).
+- **Random nonce.** The same secret encrypts to a different value each time, so a stored value can't be searched for or compared.
+- **Errors.** `decrypt()` throws `UnexpectedValueException`: `Unknown ciphertext format.`, or `Unable to decrypt: wrong key, wrong data or changed ciphertext.` The factory: a missing key gives the configuration getter's own exception (`webservco/configuration`: `OutOfBoundsException`, `Configuration key "EXAMPLE_ENCRYPTION_KEY" does not exist.`), a key that isn't base64 `UnexpectedValueException` (`EXAMPLE_ENCRYPTION_KEY is not valid base64.`), a key of the wrong length `InvalidArgumentException` (`The encryption key must be 32 bytes long.`). No message contains the key or the secret.
 
 ---
 
@@ -92,8 +84,8 @@ ddev start
 ddev c u
 # Run all validations.
 ddev c c
-# Run unit tests.
-ddev c test:dox
+# Run unit tests, with coverage (needs Xdebug, which DDEV leaves off).
+ddev xdebug on && ddev c test:dox; ddev xdebug off
 ```
 
 ---
